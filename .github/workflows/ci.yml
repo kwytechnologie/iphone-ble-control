@@ -1,0 +1,25 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test core
+        run: dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj -c Release
+      - name: Build app
+        run: dotnet build src/BleHid.App/BleHid.App.csproj -c Release
+      - name: Build CLI
+        run: dotnet build src/BleHid.Cli/BleHid.Cli.csproj -c Release

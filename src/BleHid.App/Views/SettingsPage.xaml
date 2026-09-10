@@ -1,0 +1,68 @@
+<Page x:Class="BleHid.App.Views.SettingsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      Title="Configurações">
+
+  <StackPanel Margin="24,0,24,24">
+
+    <ui:TextBlock Text="Configurações" FontTypography="TitleLarge" Margin="0,0,0,4" />
+    <ui:TextBlock Text="Escolha como o iPhone BLE Control inicia e o que acontece ao fechar a janela. O controle de teclado e mouse sempre exige ativação manual."
+                  FontTypography="Body" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                  TextWrapping="Wrap" Margin="0,0,0,20" />
+
+    <ui:InfoBar x:Name="DevBar" Severity="Informational" IsClosable="False" Margin="0,0,0,16"
+                Title="Inicialização com o Windows indisponível"
+                Message="Abra o executável publicado para habilitar esta opção; ela não está disponível com 'dotnet run'." />
+
+    <ui:CardControl Icon="{ui:SymbolIcon Power24}" Margin="0,0,0,8">
+      <ui:CardControl.Header>
+        <StackPanel>
+          <ui:TextBlock Text="Abrir com o Windows" FontTypography="BodyStrong" />
+          <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="Desativado por padrão. Se habilitado, abre na bandeja ao entrar no Windows, sem ativar o controle." />
+        </StackPanel>
+      </ui:CardControl.Header>
+      <ui:ToggleSwitch x:Name="AutoStartToggle" Click="OnAutoStartChanged" />
+    </ui:CardControl>
+
+    <ui:CardControl Icon="{ui:SymbolIcon Play24}" Margin="0,0,0,8">
+      <ui:CardControl.Header>
+        <StackPanel>
+          <ui:TextBlock Text="Iniciar o periférico ao abrir" FontTypography="BodyStrong" />
+          <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="Desativado por padrão. Se habilitado, anuncia o teclado e mouse Bluetooth ao abrir o aplicativo; o controle continua manual." />
+        </StackPanel>
+      </ui:CardControl.Header>
+      <ui:ToggleSwitch IsChecked="{Binding StartPeripheralOnLaunch, Mode=TwoWay}" />
+    </ui:CardControl>
+
+    <ui:CardControl Icon="{ui:SymbolIcon ArrowMinimize24}" Margin="0,0,0,8">
+      <ui:CardControl.Header>
+        <StackPanel>
+          <ui:TextBlock Text="Continuar na bandeja ao fechar" FontTypography="BodyStrong" />
+          <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="Mantém o periférico disponível e o controle ativo, se já estiver ligado. Ctrl+Alt+Q encerra o controle; use Sair para fechar o aplicativo." />
+        </StackPanel>
+      </ui:CardControl.Header>
+      <ui:ToggleSwitch IsChecked="{Binding CloseToTray, Mode=TwoWay}" />
+    </ui:CardControl>
+
+    <ui:CardControl Icon="{ui:SymbolIcon ArrowExit20}">
+      <ui:CardControl.Header>
+        <StackPanel>
+          <ui:TextBlock Text="Sair do iPhone BLE Control" FontTypography="BodyStrong" />
+          <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="Encerra o controle, para o anúncio Bluetooth e remove o ícone da bandeja. Será preciso reconectar o iPhone depois." />
+        </StackPanel>
+      </ui:CardControl.Header>
+      <ui:Button Content="Sair" Click="OnExit" />
+    </ui:CardControl>
+
+  </StackPanel>
+</Page>

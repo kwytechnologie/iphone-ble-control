@@ -1,0 +1,126 @@
+<Page x:Class="BleHid.App.Views.StatusPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:conv="clr-namespace:BleHid.App.Converters"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      Title="Início">
+
+  <Page.Resources>
+    <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    <conv:BoolToVisibilityConverter x:Key="InverseBoolToVisibility" Invert="True" />
+    <conv:InverseBoolConverter x:Key="InverseBool" />
+  </Page.Resources>
+
+  <!-- No page-level ScrollViewer: NavigationView already hosts pages inside one, and a nested
+       scroller swallows the wheel without being able to scroll. -->
+  <StackPanel Margin="24,0,24,24">
+
+      <ui:TextBlock Text="Controle seu iPhone" FontTypography="TitleLarge" Margin="0,0,0,4" />
+      <ui:TextBlock Text="Use o teclado e o mouse deste PC no iPhone via Bluetooth LE. Comece pelo botão Iniciar."
+                    FontTypography="Body" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" Margin="0,0,0,20" />
+
+      <ui:InfoBar Severity="Warning" IsClosable="False" Margin="0,0,0,16"
+                  Title="Bluetooth do aplicativo parado"
+                  Message="Clique em Iniciar para disponibilizar este PC como teclado e mouse Bluetooth. O controle só será ativado quando você escolher."
+                  IsOpen="{Binding IsRunning, Converter={StaticResource InverseBool}}" />
+
+      <ui:InfoBar Severity="Error" IsClosable="False" Margin="0,0,0,16"
+                  Title="Falha ao iniciar"
+                  Message="{Binding StartupError}"
+                  IsOpen="{Binding HasStartupError}" />
+
+      <ui:CardControl Icon="{ui:SymbolIcon Bluetooth24}" Margin="0,0,0,8">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <ui:TextBlock Text="Teclado e mouse Bluetooth LE" FontTypography="BodyStrong" />
+            <ui:TextBlock FontTypography="Caption"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                          Text="{Binding AdvertisementStatus, StringFormat='Anúncio Bluetooth: {0}'}" />
+          </StackPanel>
+        </ui:CardControl.Header>
+
+        <StackPanel Orientation="Horizontal">
+          <ui:Button Content="Iniciar" Appearance="Primary" Click="OnStart"
+                     IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBool}}"
+                     Visibility="{Binding IsRunning, Converter={StaticResource InverseBoolToVisibility}}" />
+          <ui:Button Content="Parar" Click="OnStop"
+                     IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBool}}"
+                     Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
+      </ui:CardControl>
+
+      <ui:CardControl Icon="{ui:SymbolIcon Info24}" Margin="0,8,0,16">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <ui:TextBlock Text="Primeira conexão com o iPhone" FontTypography="BodyStrong" Margin="0,0,0,8" />
+            <ui:TextBlock Text="1. Neste PC, clique em Iniciar e aguarde o anúncio ficar Ativo."
+                          TextWrapping="Wrap" Margin="0,0,0,6" />
+            <ui:TextBlock Text="{Binding ComputerName, StringFormat='2. No iPhone, abra Ajustes → Bluetooth e toque em {0}.'}"
+                          TextWrapping="Wrap" Margin="0,0,0,6" />
+            <ui:TextBlock Text="3. Confirme o pareamento nos aparelhos quando solicitado."
+                          TextWrapping="Wrap" Margin="0,0,0,6" />
+            <ui:TextBlock Text="4. Para mostrar o cursor no iPhone: Ajustes → Acessibilidade → Toque → AssistiveTouch. Ative AssistiveTouch."
+                          TextWrapping="Wrap" Margin="0,0,0,6" />
+            <ui:TextBlock Text="5. Aqui em Dispositivos, atualize a lista e selecione seu iPhone. Depois, em Controle, ative o teclado e o mouse."
+                          TextWrapping="Wrap" Margin="0,0,0,6" />
+            <ui:TextBlock Text="Ctrl+Alt+Q encerra o controle e devolve o teclado e mouse ao PC. Ctrl+D+C alterna entre os dispositivos e este PC."
+                          FontTypography="BodyStrong" TextWrapping="Wrap" />
+          </StackPanel>
+        </ui:CardControl.Header>
+      </ui:CardControl>
+
+      <ui:CardControl Icon="{ui:SymbolIcon LockClosed24}" Margin="0,0,0,8">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <ui:TextBlock Text="Conexão protegida" FontTypography="BodyStrong" />
+            <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                          Text="Pareamento criptografado obrigatório antes de enviar teclas e movimentos ao iPhone." />
+          </StackPanel>
+        </ui:CardControl.Header>
+        <ui:TextBlock Text="Ativa" FontTypography="BodyStrong" />
+      </ui:CardControl>
+
+      <Grid Margin="0,0,0,20">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="8" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <ui:CardControl Grid.Column="0" Icon="{ui:SymbolIcon Keyboard24}">
+          <ui:CardControl.Header>
+            <ui:TextBlock Text="Conexões de teclado" FontTypography="BodyStrong" TextWrapping="Wrap" />
+          </ui:CardControl.Header>
+          <ui:TextBlock Text="{Binding KeyboardSubscribers}" FontTypography="TitleLarge" />
+        </ui:CardControl>
+
+        <ui:CardControl Grid.Column="2" Icon="{ui:SymbolIcon Cursor24}">
+          <ui:CardControl.Header>
+            <ui:TextBlock Text="Conexões de mouse" FontTypography="BodyStrong" TextWrapping="Wrap" />
+          </ui:CardControl.Header>
+          <ui:TextBlock Text="{Binding MouseSubscribers}" FontTypography="TitleLarge" />
+        </ui:CardControl>
+      </Grid>
+
+      <ui:TextBlock Text="Registro de atividade" FontTypography="Subtitle" Margin="0,0,0,8" />
+      <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+              BorderThickness="1" CornerRadius="8" Height="220">
+        <ScrollViewer x:Name="LogScroller" VerticalScrollBarVisibility="Auto" Padding="12">
+          <ItemsControl ItemsSource="{Binding Log}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding}" FontFamily="Cascadia Mono, Consolas" FontSize="12"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+
+  </StackPanel>
+</Page>

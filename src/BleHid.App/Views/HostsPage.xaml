@@ -1,0 +1,59 @@
+<Page x:Class="BleHid.App.Views.HostsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:conv="clr-namespace:BleHid.App.Converters"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      Title="Dispositivos">
+
+  <Page.Resources>
+    <conv:InverseBoolConverter x:Key="InverseBool" />
+  </Page.Resources>
+
+  <StackPanel Margin="24,0,24,24">
+
+      <ui:TextBlock Text="Dispositivos" FontTypography="TitleLarge" Margin="0,0,0,4" />
+      <ui:TextBlock Text="Selecione o iPhone que receberá o teclado e o mouse. A lista mostra os dispositivos conectados ao serviço de teclado."
+                    FontTypography="Body" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" Margin="0,0,0,20" />
+
+      <ui:CardControl Icon="{ui:SymbolIcon Target24}" Margin="0,0,0,16">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <ui:TextBlock Text="Destino atual" FontTypography="BodyStrong" />
+            <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                          Text="{Binding Target}" />
+          </StackPanel>
+        </ui:CardControl.Header>
+        <ui:Button Content="Atualizar" Icon="{ui:SymbolIcon ArrowSync24}" Click="OnRefresh"
+                   IsEnabled="{Binding IsRunning}" />
+      </ui:CardControl>
+
+      <ui:InfoBar x:Name="NoHostsBar" Severity="Informational" IsClosable="False" Margin="0,0,0,16"
+                  Title="Nenhum dispositivo conectado"
+                  Message="Inicie o Bluetooth do aplicativo na página Início. No iPhone, abra Ajustes → Bluetooth, toque no nome deste PC e confirme o pareamento. Depois clique em Atualizar." />
+
+      <ui:TextBlock Text="Enviar teclado e mouse para" FontTypography="Subtitle" Margin="0,0,0,8" />
+
+      <ItemsControl ItemsSource="{Binding Targets}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <ui:CardControl Margin="0,0,0,8">
+              <ui:CardControl.Header>
+                <StackPanel>
+                  <ui:TextBlock Text="{Binding Title}" FontTypography="BodyStrong" />
+                  <ui:TextBlock Text="{Binding Detail}" FontTypography="Caption" TextWrapping="Wrap"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+              </ui:CardControl.Header>
+              <RadioButton GroupName="InputTarget"
+                           IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                           Checked="OnTargetChecked" />
+            </ui:CardControl>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+  </StackPanel>
+</Page>
