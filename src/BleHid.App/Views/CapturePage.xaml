@@ -12,7 +12,8 @@
     <conv:BoolToVisibilityConverter x:Key="InverseVisibility" Invert="True" />
   </Page.Resources>
 
-  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <!-- NavigationView already supplies the page scroller. A nested ScrollViewer
+       consumes wheel events even when its content has no scrollable overflow. -->
   <StackPanel Margin="24,0,24,24">
 
       <ui:TextBlock Text="Controle" FontTypography="TitleLarge" Margin="0,0,0,4" />
@@ -120,6 +121,20 @@
                       TextWrapping="Wrap" FontTypography="Caption" />
       </StackPanel>
 
+      <ui:CardControl Margin="0,0,0,16"
+                      IsEnabled="{Binding IsCapturing, Converter={StaticResource InverseBool}}">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <ui:TextBlock Text="Inverter rolagem no iPhone" FontTypography="BodyStrong" TextWrapping="Wrap" />
+            <ui:TextBlock Text="Corrige o sentido da rodinha e da rolagem com dois dedos no iPhone. Não altera o scroll do PC. Desative o controle para mudar esta opção."
+                          FontTypography="Caption" TextWrapping="Wrap"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          </StackPanel>
+        </ui:CardControl.Header>
+        <ui:ToggleSwitch IsChecked="{Binding Settings.InvertScroll, Mode=TwoWay}"
+                         AutomationProperties.Name="Inverter rolagem no iPhone" />
+      </ui:CardControl>
+
       <ui:InfoBar Severity="Informational" IsClosable="False" Margin="0,0,0,16"
                   Title="Aguardando conexão"
                   Visibility="{Binding Settings.EdgeSwitchEnabled, Converter={StaticResource InverseVisibility}}"
@@ -174,9 +189,8 @@
         <ui:CardControl.Header>
           <ui:TextBlock Text="Voltar ao PC (no modo telas, a borda continua ativa)" FontTypography="BodyStrong" TextWrapping="Wrap" />
         </ui:CardControl.Header>
-        <ui:TextBlock Text="Ctrl + Alt + Q" FontFamily="Cascadia Mono, Consolas" />
+        <ui:TextBlock Text="Ctrl + Alt esquerdo + Q" FontFamily="Cascadia Mono, Consolas" />
       </ui:CardControl>
 
   </StackPanel>
-  </ScrollViewer>
 </Page>

@@ -40,6 +40,34 @@
       <ui:ToggleSwitch IsChecked="{Binding StartPeripheralOnLaunch, Mode=TwoWay}" />
     </ui:CardControl>
 
+    <Border x:Name="CompanionAudioPanel" Padding="16" Margin="0,8,0,16" CornerRadius="8"
+            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+      <StackPanel>
+        <ui:TextBlock Text="AssistiveTouch automático" FontTypography="Subtitle" Margin="0,0,0,8" />
+        <ui:TextBlock Text="Conecta também o Bluetooth normal do PC ao iPhone para disparar suas automações do Atalhos. Não modifica o driver."
+                      TextWrapping="Wrap" Margin="0,0,0,12" />
+        <ui:ToggleSwitch Content="Conectar junto com o aplicativo"
+                         IsChecked="{Binding Settings.CompanionAudioEnabled, Mode=TwoWay}" Margin="0,0,0,12" />
+        <ui:TextBlock Text="iPhone já emparelhado para áudio" FontTypography="BodyStrong" Margin="0,0,0,6" />
+        <Grid Margin="0,0,0,10">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <ComboBox x:Name="CompanionAudioDevicePicker" MinWidth="140" Margin="0,0,8,0"
+                    ItemsSource="{Binding CompanionAudio.Devices}" DisplayMemberPath="Name" SelectedValuePath="Id"
+                    SelectedValue="{Binding CompanionAudioDeviceId, Mode=TwoWay}" />
+          <ui:Button x:Name="RefreshAudioDevicesButton" Grid.Column="1" Content="Atualizar" Click="OnRefreshAudioDevices" />
+        </Grid>
+        <ui:TextBlock Text="{Binding CompanionAudio.Status}" FontTypography="BodyStrong" TextWrapping="Wrap" Margin="0,0,0,10" />
+        <ui:TextBlock Text="O áudio do iPhone poderá sair no PC. No Atalhos, configure a entrada normal do PC: conectar → ativar AssistiveTouch; desconectar → desativar AssistiveTouch. Use Executar Imediatamente."
+                      TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8" />
+        <ui:TextBlock Text="Funciona enquanto o periférico estiver iniciado. Parar ou Sair libera o áudio; minimizar para a bandeja mantém a conexão. Outros programas conectados ao iPhone podem impedir o gatilho de desconexão."
+                      TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+    </Border>
+
     <ui:CardControl Icon="{ui:SymbolIcon ArrowMinimize24}" Margin="0,0,0,8">
       <ui:CardControl.Header>
         <StackPanel>
@@ -58,7 +86,7 @@
           <ui:TextBlock Text="Sair do iPhone BLE Control" FontTypography="BodyStrong" />
           <ui:TextBlock FontTypography="Caption" TextWrapping="Wrap"
                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Text="Encerra o controle, para o anúncio Bluetooth e remove o ícone da bandeja. Será preciso reconectar o iPhone depois." />
+                        Text="Encerra o controle, libera a conexão auxiliar de áudio, para o anúncio Bluetooth e remove o ícone da bandeja." />
         </StackPanel>
       </ui:CardControl.Header>
       <ui:Button Content="Sair" Click="OnExit" />

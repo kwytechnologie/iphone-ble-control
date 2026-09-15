@@ -16,6 +16,28 @@ public sealed class AppSettings : INotifyPropertyChanged
 
     public static AppSettings Instance { get; } = Load();
 
+    // Explicit opt-in: connecting this profile may route the phone's audio to the PC.
+    private bool _companionAudioEnabled;
+    public bool CompanionAudioEnabled
+    {
+        get => _companionAudioEnabled;
+        set { if (Set(ref _companionAudioEnabled, value)) Save(); }
+    }
+
+    private string _companionAudioDeviceId = "";
+    public string CompanionAudioDeviceId
+    {
+        get => _companionAudioDeviceId;
+        set { if (Set(ref _companionAudioDeviceId, value ?? "")) Save(); }
+    }
+
+    private bool _invertScroll = true;
+    public bool InvertScroll
+    {
+        get => _invertScroll;
+        set { if (Set(ref _invertScroll, value)) Save(); }
+    }
+
     private bool _edgeSwitchEnabled;
     private bool _middleClickReturn = true;
     public bool MiddleClickReturn

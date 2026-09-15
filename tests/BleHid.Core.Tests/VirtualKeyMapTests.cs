@@ -22,10 +22,55 @@ public class VirtualKeyMapTests
     [InlineData(0x20, 0x2C)] // Space
     [InlineData(0x70, 0x3A)] // F1
     [InlineData(0x7B, 0x45)] // F12
+    [InlineData(0xE2, 0x64)] // ABNT/ISO extra backslash
+    [InlineData(0x60, 0x62)] // Numpad 0
+    [InlineData(0x61, 0x59)] // Numpad 1
+    [InlineData(0x69, 0x61)] // Numpad 9
+    [InlineData(0x6F, 0x54)] // Numpad /
+    [InlineData(0x6A, 0x55)] // Numpad *
+    [InlineData(0x6D, 0x56)] // Numpad -
+    [InlineData(0x6B, 0x57)] // Numpad +
+    [InlineData(0x6E, 0x63)] // Numpad decimal
+    [InlineData(0x90, 0x53)] // Num Lock
+    [InlineData(0x5D, 0x65)] // Menu
     public void Maps_known_virtual_keys_to_usage_ids(int virtualKey, byte expected)
     {
         Assert.True(VirtualKeyMap.TryGetUsage(virtualKey, out var usage));
         Assert.Equal(expected, usage);
+    }
+
+    [Theory]
+    [InlineData(0x0D, 0x1C, false, 0x28)] // Main Enter
+    [InlineData(0x0D, 0x1C, true, 0x58)]  // Numpad Enter
+    [InlineData(0x6F, 0x35, true, 0x54)]  // Numpad slash, not main slash
+    [InlineData(0xE2, 0x56, false, 0x64)] // Extra ABNT/ISO key
+    [InlineData(0x24, 0x47, false, 0x4A)] // Num Lock off: preserve Windows Home semantics
+    [InlineData(0x24, 0x47, true, 0x4A)]  // Dedicated Home
+    public void Capture_distinguishes_extended_keys(int virtualKey, int scanCode, bool extended, byte expected)
+    {
+        Assert.True(VirtualKeyMap.TryGetUsage(virtualKey, scanCode, extended, out var usage));
+        Assert.Equal(expected, usage);
+        Assert.InRange(usage, (byte)0, (byte)101);
+    }
+
+    [Theory]
+    [InlineData(0xDB, 0x1A, 0x2F)] // ABNT acute accent
+    [InlineData(0xDE, 0x28, 0x34)] // ABNT tilde: do not swap blindly for another host layout
+    [InlineData(0xBA, 0x27, 0x33)] // ABNT cedilla
+    [InlineData(0xC0, 0x29, 0x35)] // ABNT apostrophe
+    public void Brazilian_punctuation_retains_its_physical_hid_position(int virtualKey, int scanCode, byte expected)
+    {
+        Assert.True(VirtualKeyMap.TryGetUsage(virtualKey, scanCode, false, out var usage));
+        Assert.Equal(expected, usage);
+    }
+
+    [Theory]
+    [InlineData(0xE7, 0x28)] // VK_PACKET is Unicode input, not a physical accent key
+    [InlineData(0xC1, 0x73)] // ABNT C1 needs HID 0x87, outside the existing report map
+    [InlineData(0xC2, 0x7E)] // ABNT C2 needs HID 0x85, outside the existing report map
+    public void Does_not_emit_unsupported_or_unicode_keys(int virtualKey, int scanCode)
+    {
+        Assert.False(VirtualKeyMap.TryGetUsage(virtualKey, scanCode, false, out _));
     }
 
     [Fact]

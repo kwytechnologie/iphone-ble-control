@@ -23,9 +23,14 @@ public static class CaptureSession
         bool stopEndsSession,
         CancellationToken cancellationToken,
         EdgeSwitchOptions? edgeSwitch = null,
-        RemoteReturnOptions? returnOptions = null)
+        RemoteReturnOptions? returnOptions = null,
+        bool invertScroll = false)
     {
-        using var capture = new InputCapture { Verbose = verbose, EdgeSwitch = edgeSwitch, ReturnOptions = returnOptions ?? new() };
+        using var capture = new InputCapture
+        {
+            Verbose = verbose, EdgeSwitch = edgeSwitch,
+            ReturnOptions = returnOptions ?? new(), InvertScroll = invertScroll
+        };
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Exception? captureFailure = null;
         using var registration = cancellationToken.Register(() =>

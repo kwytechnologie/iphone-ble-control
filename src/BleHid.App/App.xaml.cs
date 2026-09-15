@@ -70,7 +70,14 @@ public partial class App : Application
         {
             ApplicationThemeManager.ApplySystemTheme();
             base.OnStartup(e);
-            MainWindow = new MainWindow();
+            MainWindow = new MainWindow
+            {
+                Width = 720,
+                Height = 520,
+                ShowActivated = false,
+                ShowInTaskbar = false,
+                Opacity = 0
+            };
             MainWindow.Show();
             MainWindow.UpdateLayout();
             foreach (var page in new FrameworkElement[]
@@ -83,6 +90,8 @@ public partial class App : Application
                 page.Arrange(new Rect(0, 0, 720, 520));
                 page.UpdateLayout();
             }
+
+            var scrollResult = VerifySmokeCaptureScrolling(MainWindow);
 
             // Render our own WPF visual tree, not a desktop screenshot. Show the new panel
             // without changing saved preferences, pairing, input hooks or the running app.
@@ -103,7 +112,7 @@ public partial class App : Application
             using (var stream = File.Create(AppPaths.InLogs("screen-layout-preview.png"))) encoder.Save(stream);
 
             File.WriteAllText(smokeLog,
-                $"{DateTime.Now:s} OK: MainWindow e quatro páginas WPF carregadas. Bluetooth e captura não iniciados.\n");
+                $"{DateTime.Now:s} OK: MainWindow e quatro páginas WPF carregadas. {scrollResult} Bluetooth e captura não iniciados.\n");
             Shutdown(0);
         }
         catch (Exception ex)
@@ -111,6 +120,146 @@ public partial class App : Application
             try { File.WriteAllText(smokeLog, $"{DateTime.Now:s} FAIL: {ex}\n"); }
             catch (Exception logError) when (logError is IOException or UnauthorizedAccessException) { }
             Shutdown(1);
+        }
+    }
+
+    // These helpers are used only by --smoke-test. Routed events remain in this process's
+    // visual tree: they do not move the system pointer, inject input or contact a BLE host.
+    private static string VerifySmokeCaptureScrolling(Window window)
+    {
+        PumpSmokeLayout(window);
+        var navigation = (Wpf.Ui.Controls.NavigationView)window.FindName("RootNavigation");
+        navigation.Transition = Wpf.Ui.Animations.Transition.None;
+        navigation.TransitionDuration = 0;
+        if (!navigation.Navigate(typeof(Views.CapturePage)))
+            throw new InvalidOperationException("Smoke: não foi possível navegar para Controle.");
+        PumpSmokeLayout(window);
+
+        var capture = SmokeVisualDescendants<Views.CapturePage>(navigation).Single();
+        var source = (FrameworkElement)capture.FindName("LayoutPanel");
+        // Override this visual only; never toggle EdgeSwitchEnabled or change saved settings.
+        source.Visibility = Visibility.Visible;
+        PumpSmokeLayout(window);
+
+        System.Windows.Controls.ScrollViewer? outer = null;
+        for (var ancestor = System.Windows.Media.VisualTreeHelper.GetParent(capture);
+             ancestor is not null;
+             ancestor = System.Windows.Media.VisualTreeHelper.GetParent(ancestor))
+        {
+            if (ancestor is System.Windows.Controls.ScrollViewer scrollViewer)
+            {
+                outer = scrollViewer;
+                break;
+            }
+        }
+        if (outer is null || outer.ScrollableHeight <= 0)
+            throw new InvalidOperationException("Smoke: Controle não está dentro do scroller rolável da navegação.");
+
+        outer.ScrollToTop();
+        PumpSmokeLayout(window);
+        var initial = outer.VerticalOffset;
+        RaiseSmokeWheel(source, -120);
+        PumpSmokeLayout(window);
+        var down = outer.VerticalOffset;
+        var expectedNotch = Math.Min(outer.ScrollableHeight,
+            LocalPageScroll.Pixels(-120, SystemParameters.WheelScrollLines, outer.ViewportHeight));
+        AssertSmokeOffset(down, expectedNotch, "roda inteira/sem duplicação");
+
+        RaiseSmokeWheel(source, 120);
+        PumpSmokeLayout(window);
+        var up = outer.VerticalOffset;
+        AssertSmokeOffset(up, 0, "retorno da roda");
+
+        outer.ScrollToTop();
+        PumpSmokeLayout(window);
+        RaiseSmokeWheel(source, -30);
+        PumpSmokeLayout(window);
+        var quarter = outer.VerticalOffset;
+        var expectedQuarter = Math.Min(outer.ScrollableHeight,
+            LocalPageScroll.Pixels(-30, SystemParameters.WheelScrollLines, outer.ViewportHeight));
+        AssertSmokeOffset(quarter, expectedQuarter, "delta de um quarto de roda");
+
+        outer.ScrollToTop();
+        PumpSmokeLayout(window);
+        for (var index = 0; index < 4; index++) RaiseSmokeWheel(source, -30);
+        PumpSmokeLayout(window);
+        AssertSmokeOffset(outer.VerticalOffset, expectedNotch, "quatro deltas no mesmo frame");
+
+        VerifySmokeNestedWheelControls(window, capture, outer);
+
+        return $"Rolagem proporcional em Controle (720x520): {initial:0.##} -> {down:0.##} -> {up:0.##}; delta -30 -> {quarter:0.##}; quatro frações = uma roda; controles internos preservados.";
+    }
+
+    private static void AssertSmokeOffset(double actual, double expected, string label)
+    {
+        if (Math.Abs(actual - expected) > 0.1)
+            throw new InvalidOperationException($"Smoke: {label}: esperado {expected}, encontrado {actual}.");
+    }
+
+    private static void VerifySmokeNestedWheelControls(Window window, Views.CapturePage capture,
+        System.Windows.Controls.ScrollViewer outer)
+    {
+        var panel = (System.Windows.Controls.Panel)capture.Content;
+        // Temporary controls live only in the test tree; none is bound to user preferences.
+        foreach (var control in new FrameworkElement[]
+                 {
+                     new System.Windows.Controls.ComboBox(), new System.Windows.Controls.ListBox(),
+                     new System.Windows.Controls.TextBox(), new System.Windows.Controls.PasswordBox(),
+                     new System.Windows.Controls.Slider()
+                 })
+        {
+            panel.Children.Add(control);
+            PumpSmokeLayout(window);
+            var args = new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice,
+                Environment.TickCount, -30) { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseWheelEvent };
+            control.RaiseEvent(args);
+            if (args.Handled)
+                throw new InvalidOperationException($"Smoke: roda de {control.GetType().Name} foi interceptada pela página.");
+            panel.Children.Remove(control);
+        }
+
+        var nestedContent = new System.Windows.Controls.Border { Height = 1000 };
+        var nested = new System.Windows.Controls.ScrollViewer { Height = 100, Content = nestedContent };
+        panel.Children.Add(nested);
+        PumpSmokeLayout(window);
+        outer.ScrollToBottom();
+        PumpSmokeLayout(window);
+        var before = outer.VerticalOffset;
+        RaiseSmokeWheel(nestedContent, -120);
+        PumpSmokeLayout(window);
+        AssertSmokeOffset(outer.VerticalOffset, before, "scroller interno não deve mover a página");
+        if (SystemParameters.WheelScrollLines != 0 && nested.VerticalOffset <= 0)
+            throw new InvalidOperationException("Smoke: scroller interno deixou de receber a roda.");
+        panel.Children.Remove(nested);
+    }
+
+    private static void RaiseSmokeWheel(UIElement source, int delta)
+    {
+        // WPF input uses a preview/bubble pair sharing the handled flag. Reproduce that
+        // routing without SendInput, physical mouse actions or global input hooks.
+        var args = new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice,
+            Environment.TickCount, delta) { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseWheelEvent };
+        source.RaiseEvent(args);
+        if (args.Handled) return;
+        args.RoutedEvent = System.Windows.Input.Mouse.MouseWheelEvent;
+        source.RaiseEvent(args);
+    }
+
+    private static void PumpSmokeLayout(Window window)
+    {
+        window.UpdateLayout();
+        window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        window.UpdateLayout();
+    }
+
+    private static IEnumerable<T> SmokeVisualDescendants<T>(DependencyObject parent) where T : DependencyObject
+    {
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (var index = 0; index < count; index++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, index);
+            if (child is T match) yield return match;
+            foreach (var descendant in SmokeVisualDescendants<T>(child)) yield return descendant;
         }
     }
 
@@ -168,10 +317,14 @@ public partial class App : Application
     {
         if (_exiting) return;
         _exiting = true;
-        await PeripheralService.Instance.StopAsync();
-        Tray?.Dispose();
-        // Shutdown closes windows, so it must not run inside a close that is still unwinding.
-        await Dispatcher.InvokeAsync(Shutdown);
+        try { await PeripheralService.Instance.StopAsync(); }
+        catch (Exception ex) { Report(ex); }
+        finally
+        {
+            Tray?.Dispose();
+            // Shutdown closes windows, so it must not run inside a close that is still unwinding.
+            await Dispatcher.InvokeAsync(Shutdown);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

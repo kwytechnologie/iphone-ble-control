@@ -10,6 +10,11 @@ public partial class SettingsPage : Page
     {
         InitializeComponent();
         DataContext = AppSettings.Instance;
+        CompanionAudioPanel.DataContext = PeripheralService.Instance;
+        Loaded += async (_, _) =>
+        {
+            if (!App.Current.IsExiting) await RefreshAudioDevicesAsync();
+        };
 
         var available = StartupService.Command is not null;
         DevBar.IsOpen = !available;
@@ -21,4 +26,14 @@ public partial class SettingsPage : Page
         StartupService.Set(AutoStartToggle.IsChecked == true);
 
     private void OnExit(object sender, RoutedEventArgs e) => App.Current.ExitApplication();
+
+    private async void OnRefreshAudioDevices(object sender, RoutedEventArgs e) =>
+        await RefreshAudioDevicesAsync();
+
+    private async Task RefreshAudioDevicesAsync()
+    {
+        RefreshAudioDevicesButton.IsEnabled = false;
+        try { await PeripheralService.Instance.RefreshCompanionAudioDevicesAsync(); }
+        finally { RefreshAudioDevicesButton.IsEnabled = true; }
+    }
 }

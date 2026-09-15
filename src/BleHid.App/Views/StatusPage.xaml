@@ -51,6 +51,17 @@
         </StackPanel>
       </ui:CardControl>
 
+      <ui:CardControl Icon="{ui:SymbolIcon Bluetooth24}" Margin="0,0,0,8"
+                      Visibility="{Binding Settings.CompanionAudioEnabled, Converter={StaticResource BoolToVisibility}}">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <ui:TextBlock Text="AssistiveTouch automático" FontTypography="BodyStrong" />
+            <ui:TextBlock Text="{Binding CompanionAudio.Status}" TextWrapping="Wrap"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          </StackPanel>
+        </ui:CardControl.Header>
+      </ui:CardControl>
+
       <ui:CardControl Icon="{ui:SymbolIcon Info24}" Margin="0,8,0,16">
         <ui:CardControl.Header>
           <StackPanel>

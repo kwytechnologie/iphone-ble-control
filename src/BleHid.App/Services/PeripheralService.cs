@@ -24,6 +24,12 @@ public sealed class PeripheralService : INotifyPropertyChanged
 
     private PeripheralService()
     {
+        CompanionAudio.Log += Append;
+        Settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AppSettings.CompanionAudioEnabled) or nameof(AppSettings.CompanionAudioDeviceId))
+                ApplyCompanionAudio();
+        };
         RefreshMonitors();
         _poll = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
@@ -49,6 +55,37 @@ public sealed class PeripheralService : INotifyPropertyChanged
     public ObservableCollection<HostTarget> Hosts { get; } = [];
     public ObservableCollection<TargetOption> Targets { get; } = [];
     public AppSettings Settings => AppSettings.Instance;
+    public ClassicAudioService CompanionAudio { get; } = new();
+    private bool _stoppingPeripheral;
+    private Task? _stopTask;
+
+    // A refresh temporarily clears the ComboBox selection; never erase a saved endpoint for that.
+    public string CompanionAudioDeviceId
+    {
+        get => Settings.CompanionAudioDeviceId;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            Settings.CompanionAudioDeviceId = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public async Task RefreshCompanionAudioDevicesAsync()
+    {
+        await CompanionAudio.RefreshDevicesAsync();
+        OnPropertyChanged(nameof(CompanionAudioDeviceId));
+    }
+
+    private void ApplyCompanionAudio()
+    {
+        // Constructors and smoke tests must never enable any Bluetooth profile.
+        if (IsRunning && !_stoppingPeripheral && !App.Current.IsExiting && Settings.CompanionAudioEnabled &&
+            !string.IsNullOrWhiteSpace(Settings.CompanionAudioDeviceId))
+            CompanionAudio.Start(Settings.CompanionAudioDeviceId);
+        else
+            _ = CompanionAudio.StopAsync();
+    }
     public sealed record MonitorOption(string Id, string Title);
     public ObservableCollection<MonitorOption> Monitors { get; } = [];
     public string EdgeMonitorId
@@ -153,7 +190,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
 
     public async Task StartAsync()
     {
-        if (IsRunning || IsBusy) return;
+        if (IsRunning || IsBusy || _stoppingPeripheral || App.Current.IsExiting) return;
         IsBusy = true;
         StartupError = "";
         BleHidPeripheral? peripheral = null;
@@ -170,6 +207,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
             _poll.Start();
             RefreshCounters();
             await RefreshHostsAsync();
+            ApplyCompanionAudio();
         }
         catch (Exception ex)
         {
@@ -206,10 +244,22 @@ public sealed class PeripheralService : INotifyPropertyChanged
         }
     }
 
-    public async Task StopAsync()
+    // A window exit during a pending Stop must await the same cleanup, not skip it.
+    public Task StopAsync() => _stopTask is { IsCompleted: false } ? _stopTask : _stopTask = StopCoreAsync();
+
+    private async Task StopCoreAsync()
     {
         WaitingForScreenHost = false;
-        if (!IsRunning || IsBusy) return;
+        _stoppingPeripheral = true;
+        // Return local input immediately even if the audio provider takes time to close.
+        _captureCancellation?.Cancel();
+        // Always release the companion, including failed or still-starting BLE sessions.
+        await CompanionAudio.StopAsync();
+        if (!IsRunning || IsBusy)
+        {
+            _stoppingPeripheral = false;
+            return;
+        }
         IsBusy = true;
         try
         {
@@ -233,6 +283,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
         finally
         {
             IsBusy = false;
+            _stoppingPeripheral = false;
         }
     }
 
@@ -433,6 +484,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
         var token = cancellation.Token;
         var interval = PointerIntervalMs;
         var returnOptions = new RemoteReturnOptions(Settings.MiddleClickReturn, Settings.EstimatedEdgeReturn, Settings.EstimatedTravel);
+        var invertScroll = Settings.InvertScroll;
 
         // Ctrl+Alt+Q ends the session, so the toggle has to follow the hotkey rather than the click.
         _captureTask = Task.Run(async () =>
@@ -440,7 +492,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
             try
             {
                 await CaptureSession.RunAsync(peripheral, Append, verbose: false, interval,
-                    stopEndsSession: !resident && edgeSwitch is null, token, edgeSwitch, returnOptions);
+                    stopEndsSession: !resident && edgeSwitch is null, token, edgeSwitch, returnOptions, invertScroll);
             }
             catch (Exception ex)
             {

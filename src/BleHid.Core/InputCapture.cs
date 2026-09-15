@@ -26,7 +26,9 @@ public sealed class InputCapture : IDisposable
     private const int WM_MBUTTONDOWN = 0x0207, WM_MBUTTONUP = 0x0208;
     private const int WM_MOUSEWHEEL = 0x020A;
 
-    private readonly HashSet<byte> _pressedUsages = [];
+    private readonly CapturedKeyboardState _keyboardState = new();
+    private readonly WheelDeltaAccumulator _wheelDelta = new();
+    private int _resetWheelDelta;
     private readonly HashSet<int> _pressedVirtualKeys = [];
     private LowLevelProc? _keyboardProc;
     private LowLevelProc? _mouseProc;
@@ -52,6 +54,7 @@ public sealed class InputCapture : IDisposable
 
     public EdgeSwitchOptions? EdgeSwitch { get; init; }
     public RemoteReturnOptions ReturnOptions { get; init; } = new();
+    public bool InvertScroll { get; init; }
     public event Action? ReturnLocalRequested;
     private readonly MiddleReturnGesture _middleReturn = new();
     private RemoteEdgeEstimate? _remoteEstimate;
@@ -72,6 +75,8 @@ public sealed class InputCapture : IDisposable
     /// so the first delta is not the distance the pointer travelled locally.</summary>
     public void SetPassThrough(bool value)
     {
+        // Also reset when retargeting directly from one remote host to another.
+        Interlocked.Exchange(ref _resetWheelDelta, 1);
         if (_passThrough == value) return;
         if (!value && _running) RememberLocalCursor();
         _passThrough = value;
@@ -107,8 +112,9 @@ public sealed class InputCapture : IDisposable
             throw new InvalidOperationException("The previous input capture is still stopping.");
         _started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _pressedVirtualKeys.Clear();
-        _pressedUsages.Clear();
+        _keyboardState.Clear();
         _buttons = MouseButtons.None;
+        _wheelDelta.Reset();
         _switchLatched = false;
         _edgeDetector = EdgeSwitch is null ? null : new EdgeSwitchDetector(EdgeSwitch);
         _remoteEstimate = EdgeSwitch is not null && ReturnOptions.EstimatedEdge
@@ -287,9 +293,9 @@ public sealed class InputCapture : IDisposable
         if (isDown) _pressedVirtualKeys.Add(virtualKey);
         else _pressedVirtualKeys.Remove(virtualKey);
 
-        if (isDown && virtualKey == 0x51 && IsDown(0x11) && IsDown(0x12)) // Ctrl+Alt+Q
+        if (IsStopShortcut(virtualKey, isDown, CurrentModifiers()))
         {
-            _pressedUsages.Clear();
+            _keyboardState.Clear();
             _pressedVirtualKeys.Clear();
             KeyboardReport?.Invoke(KeyModifiers.None, []);
             StopRequested?.Invoke();
@@ -303,7 +309,7 @@ public sealed class InputCapture : IDisposable
             if (!_switchLatched)
             {
                 _switchLatched = true;
-                _pressedUsages.Clear();
+                _keyboardState.Clear();
                 KeyboardReport?.Invoke(KeyModifiers.None, []);
                 SwitchHostRequested?.Invoke();
             }
@@ -313,14 +319,10 @@ public sealed class InputCapture : IDisposable
         // Hotkeys stay live in pass-through, but nothing else is captured or swallowed.
         if (_passThrough) return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
 
-        if (VirtualKeyMap.TryGetUsage(virtualKey, out var usage))
-        {
-            if (isDown) _pressedUsages.Add(usage);
-            else _pressedUsages.Remove(usage);
-        }
+        _keyboardState.Update(virtualKey, (int)data.scanCode, (data.flags & 0x01) != 0, isDown);
 
         var modifiers = CurrentModifiers();
-        var usages = _pressedUsages.Take(6).ToArray();
+        var usages = _keyboardState.Usages();
         if (Verbose && _keyboardEvents <= 20)
             Log?.Invoke($"  [key] vk=0x{virtualKey:x2} {(isDown ? "down" : "up")} -> mod=0x{(byte)modifiers:x2} usages=[{string.Join(" ", usages.Select(u => u.ToString("x2")))}]");
 
@@ -376,12 +378,19 @@ public sealed class InputCapture : IDisposable
             case WM_MBUTTONUP:   _buttons &= ~MouseButtons.Middle; MouseReport?.Invoke(_buttons, 0, 0, 0); break;
 
             case WM_MOUSEWHEEL:
-                var notches = (short)((data.mouseData >> 16) & 0xFFFF) / 120;
+                var notches = AccumulateWheelDelta((short)((data.mouseData >> 16) & 0xFFFF));
                 if (notches != 0) MouseReport?.Invoke(_buttons, 0, 0, notches);
                 break;
         }
 
         return 1; // swallow locally
+    }
+
+    internal int AccumulateWheelDelta(int delta)
+    {
+        // The hook owns the accumulator; target changes can arrive from the UI thread.
+        if (Interlocked.Exchange(ref _resetWheelDelta, 0) != 0) _wheelDelta.Reset();
+        return _wheelDelta.Add(delta, InvertScroll);
     }
 
     private void PollEdgeCursor()
@@ -402,11 +411,20 @@ public sealed class InputCapture : IDisposable
     private void ResetInputStateIfNeeded()
     {
         if (Interlocked.Exchange(ref _resetInputState, 0) == 0) return;
-        _pressedUsages.Clear();
+        _keyboardState.Clear();
+        _wheelDelta.Reset();
         _buttons = MouseButtons.None;
         _edgeDetector?.Reset();
         _remoteEstimate?.Reset(Environment.TickCount64);
     }
+
+    // Windows may represent AltGr as LeftCtrl + RightAlt. In Brazilian layouts,
+    // AltGr+Q types '/', so it must not be mistaken for the emergency stop chord.
+    internal static bool IsStopShortcut(int virtualKey, bool isDown, KeyModifiers modifiers) =>
+        isDown && virtualKey == 0x51 &&
+        (modifiers & (KeyModifiers.LeftControl | KeyModifiers.RightControl)) != 0 &&
+        (modifiers & KeyModifiers.LeftAlt) != 0 &&
+        (modifiers & KeyModifiers.RightAlt) == 0;
 
     private bool IsDown(int virtualKey) => virtualKey switch
     {

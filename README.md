@@ -75,7 +75,7 @@ Ative o modo telas e leve o ponteiro à borda escolhida. Há uma pequena perman�
 
 Para voltar ao PC:
 
-- **Ctrl + Alt + Q:** atalho de emergência. Em modo telas, a sessão pode continuar armada.
+- **Ctrl + Alt esquerdo + Q:** atalho de emergência. Em modo telas, a sessão pode continuar armada; AltGr+Q não encerra o controle.
 - **Clique da rodinha:** ativado por padrão; pressione o botão central. Girar a rodinha continua rolando.
 - **Borda estimada:** opção experimental, desativada por padrão. O app estima o deslocamento, mas não recebe
   a posição real do ponteiro no iOS. Ajuste a distância se o retorno ocorrer cedo ou tarde.
@@ -84,6 +84,28 @@ Para voltar ao PC:
 Pare o controle antes de alterar as opções. Gestos do touchpad não são remapeados;
 um gesto já configurado no Windows para clique central pode servir como retorno.
 Veja [RETORNO-SEM-TECLADO.md](RETORNO-SEM-TECLADO.md).
+
+## AssistiveTouch automático
+
+Em **Configurações → AssistiveTouch automático**, selecione o iPhone já emparelhado
+para áudio e ative **Conectar junto com o aplicativo**. A opção vem desligada por padrão.
+O app abre uma conexão de áudio pelo Bluetooth normal do PC, além do teclado/mouse BLE,
+para acionar as automações de conectar/desconectar configuradas no Atalhos do iPhone.
+
+**O áudio do iPhone pode sair no PC.** Não há troca de driver nem unificação das duas entradas.
+**Parar**, desativar a opção ou **Sair** libera a conexão auxiliar. Fechar para a bandeja a mantém.
+Outros aplicativos conectados podem impedir que o iPhone detecte a desconexão.
+Veja a configuração e as limitações em [ASSISTIVETOUCH-AUTOMATICO.md](ASSISTIVETOUCH-AUTOMATICO.md).
+
+## Teclado e rolagem
+
+- A rolagem das páginas do app é proporcional aos gestos do touchpad e segue a quantidade de linhas do Windows.
+- **Inverter rolagem no iPhone**, na página Controle, muda apenas o sentido da rolagem remota.
+- Deltas pequenos de rolagem remota são acumulados, em vez de descartados.
+- Melhorias para teclado numérico, tecla extra ISO/ABNT e soltura de teclas ao mudar Num Lock.
+
+A correspondência de acentos ainda depende do layout de teclado físico selecionado no iPhone.
+Veja [TECLADO-E-ROLAGEM.md](TECLADO-E-ROLAGEM.md) para os limites e testes sugeridos.
 
 ## Limites e cuidados
 
@@ -106,7 +128,7 @@ dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj -c Release
 git diff --check
 ```
 
-A suíte automatizada cobre relatórios HID, temporização, bordas e recuperação de controle.
+A suíte automatizada cobre relatórios HID, temporização, bordas, teclado, rolagem e recuperação de controle.
 Ela não comprova compatibilidade física nem mede a latência no iPhone.
 `tests/Invoke-HandoverTests.ps1` é um teste manual com rádio real e encerra processos do app/CLI:
 **não o execute durante uma sessão em uso**.
