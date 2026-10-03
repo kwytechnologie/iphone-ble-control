@@ -321,6 +321,8 @@ public partial class App : Application
         catch (Exception ex) { Report(ex); }
         finally
         {
+            try { await PeripheralService.Instance.VirtualDisplay.HideAsync(); }
+            catch (Exception ex) { Report(ex); }
             Tray?.Dispose();
             // Shutdown closes windows, so it must not run inside a close that is still unwinding.
             await Dispatcher.InvokeAsync(Shutdown);

@@ -4,7 +4,9 @@ Controle o iPhone com o teclado e o mouse de um PC Windows por Bluetooth Low Ene
 Interface desktop, seleção do dispositivo, passagem pela borda do monitor e retorno ao PC.
 
 **Projeto experimental e independente.** Não é um produto da Apple e não tem vínculo com ela.
-O app envia comandos de teclado/mouse; **não transmite vídeo e não transforma o iPhone em um monitor do Windows**.
+O app envia comandos de teclado/mouse; **não transmite vídeo para o iPhone**.
+O modo opcional de monitor virtual permite organizar a posição do telefone nas configurações de tela do Windows,
+mas não exibe no iPhone as janelas ou arquivos arrastados para esse monitor.
 
 ## Código aberto
 
@@ -51,6 +53,11 @@ Abra `publish/app/BleHid.App.exe`. **Compartilhe a pasta inteira**, não só o e
 Os binários compilados não têm assinatura digital. Verifique a procedência e o código antes de executá-los;
 não desative o antivírus para usar o projeto.
 
+Para incluir o **monitor virtual (Windows x64)**, compile também a ponte nativa e publique
+o helper na mesma pasta, conforme [TELAS-WINDOWS.md](TELAS-WINDOWS.md).
+O driver assinado é uma dependência externa e não é instalado automaticamente.
+O pacote ARM64 não inclui esse recurso; o app e a CLI mantêm seu funcionamento básico.
+
 O código da CLI também está disponível:
 
 ```powershell
@@ -85,6 +92,17 @@ Pare o controle antes de alterar as opções. Gestos do touchpad não são remap
 um gesto já configurado no Windows para clique central pode servir como retorno.
 Veja [RETORNO-SEM-TECLADO.md](RETORNO-SEM-TECLADO.md).
 
+### Organizar pelo Windows
+
+Com o componente opcional instalado, use **Mostrar iPhone nas telas** e mantenha marcada
+a opção **Usar a posição definida nas telas do Windows**. Ative o modo telas uma vez.
+Depois, use **Organizar no Windows**, arraste a tela virtual e clique em **Aplicar**:
+a passagem acompanha a nova posição automaticamente, sem desativar e reativar o modo.
+
+Mantenha um monitor físico como principal. Janelas levadas à tela virtual ficam invisíveis:
+use **Recuperar janelas** ou **Remover tela virtual**. Sair do app remove a tela;
+minimizar mantém. Veja [TELAS-WINDOWS.md](TELAS-WINDOWS.md) para instalação e recuperação.
+
 ## AssistiveTouch automático
 
 Em **Configurações → AssistiveTouch automático**, selecione o iPhone já emparelhado
@@ -96,6 +114,10 @@ para acionar as automações de conectar/desconectar configuradas no Atalhos do 
 **Parar**, desativar a opção ou **Sair** libera a conexão auxiliar. Fechar para a bandeja a mantém.
 Outros aplicativos conectados podem impedir que o iPhone detecte a desconexão.
 Veja a configuração e as limitações em [ASSISTIVETOUCH-AUTOMATICO.md](ASSISTIVETOUCH-AUTOMATICO.md).
+
+O botão **Reconectar áudio** e a recuperação de quedas/suspensão atuam apenas sobre a conexão
+de áudio deste app. Não trocam drivers nem refazem o emparelhamento.
+Veja [ESTABILIDADE-AUDIO.md](ESTABILIDADE-AUDIO.md) para os limites dessa recuperação.
 
 ## Teclado e rolagem
 
@@ -124,12 +146,14 @@ diagnósticos podem conter nomes de dispositivos, identificadores e detalhes de 
 ## Testes e contribuição
 
 ```powershell
-dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj -c Release
+dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj -c Release --filter "FullyQualifiedName!~Hook_thread_samples_cursor_on_timer_without_requiring_mouse_callbacks"
 git diff --check
 ```
 
 A suíte automatizada cobre relatórios HID, temporização, bordas, teclado, rolagem e recuperação de controle.
 Ela não comprova compatibilidade física nem mede a latência no iPhone.
+O comando acima exclui o teste que instala hooks reais de entrada. A ponte nativa tem testes
+separados, sem criar dispositivos ou solicitar administrador: veja [tools/NativeCallbacks/README.md](tools/NativeCallbacks/README.md).
 `tests/Invoke-HandoverTests.ps1` é um teste manual com rádio real e encerra processos do app/CLI:
 **não o execute durante uma sessão em uso**.
 
@@ -143,4 +167,5 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md). Colaboradores não precisam receber sua
 - `src/BleHid.Cli`: comandos e diagnóstico.
 - `tests`: testes automatizados e cenários manuais.
 - `tools`: utilitários de desenvolvimento.
+- `tools/VirtualDisplayHost` e `tools/NativeCallbacks`: componente opcional de monitor virtual x64.
 - `android`, `experiments`, `spike`: código experimental herdado do upstream; não é necessário para controlar o iPhone.

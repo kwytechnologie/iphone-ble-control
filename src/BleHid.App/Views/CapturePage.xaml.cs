@@ -24,5 +24,25 @@ public partial class CapturePage : Page
 
     private void OnRefreshMonitors(object sender, System.Windows.RoutedEventArgs e) => _service.RefreshMonitors();
 
+    private async void OnShowWindowsDisplay(object sender, System.Windows.RoutedEventArgs e)
+    {
+        await _service.StopCaptureAsync();
+        await _service.VirtualDisplay.ShowAsync();
+        _service.RefreshMonitors();
+    }
+
+    private async void OnHideWindowsDisplay(object sender, System.Windows.RoutedEventArgs e)
+    {
+        await _service.StopCaptureAsync();
+        await _service.VirtualDisplay.HideAsync();
+        _service.RefreshMonitors();
+    }
+
+    private void OnOpenWindowsDisplaySettings(object sender, System.Windows.RoutedEventArgs e) =>
+        _service.VirtualDisplay.OpenDisplaySettings();
+
+    private void OnRecoverVirtualWindows(object sender, System.Windows.RoutedEventArgs e) =>
+        _service.VirtualDisplay.RecoverWindows();
+
     private async void OnToggleScreenMode(object sender, System.Windows.RoutedEventArgs e) => await _service.ToggleScreenModeAsync();
 }

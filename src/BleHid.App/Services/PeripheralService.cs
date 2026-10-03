@@ -19,16 +19,34 @@ public sealed class PeripheralService : INotifyPropertyChanged
     private BleHidPeripheral? _peripheral;
     private CancellationTokenSource? _captureCancellation;
     private Task? _captureTask;
+    private readonly DisplayLayoutRefreshGate _layoutRefresh = new();
+    private CancellationTokenSource? _layoutRefreshDelay;
+    private string _captureLayoutSignature = "";
     private readonly DispatcherTimer _poll;
     private readonly Dispatcher _dispatcher = Application.Current.Dispatcher;
 
     private PeripheralService()
     {
         CompanionAudio.Log += Append;
+        VirtualDisplay.Changed += () =>
+        {
+            if (!VirtualDisplay.IsVisible) CancelDisplayLayoutRefresh();
+            RefreshMonitors();
+        };
         Settings.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(AppSettings.CompanionAudioEnabled) or nameof(AppSettings.CompanionAudioDeviceId))
                 ApplyCompanionAudio();
+            if (e.PropertyName is nameof(AppSettings.UseWindowsDisplayLayout) or nameof(AppSettings.EdgeSwitchEnabled))
+                CancelDisplayLayoutRefresh();
+        };
+        Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
+        {
+            if (e.Mode != Microsoft.Win32.PowerModes.Resume) return;
+            _dispatcher.BeginInvoke(() =>
+            {
+                if (!App.Current.IsExiting) ReconnectCompanionAudio();
+            });
         };
         RefreshMonitors();
         _poll = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
@@ -38,17 +56,16 @@ public sealed class PeripheralService : INotifyPropertyChanged
         _poll.Tick += async (_, _) =>
         {
             RefreshCounters();
+            // Fallback for missed/coalesced display notifications. Read native current
+            // positions, not Screen's cached bounds; never poll in the mouse hook.
+            if (IsCapturing && Settings.UseWindowsDisplayLayout && !IsUpdatingDisplayLayout &&
+                _captureLayoutSignature.Length != 0 &&
+                WindowsDisplayLayout.CurrentSignature() != _captureLayoutSignature)
+                await RefreshDisplayLayoutAsync();
             await TryStartScreenModeAsync();
         };
-        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => _dispatcher.BeginInvoke(async () =>
-        {
-            if (IsCapturing)
-            {
-                await StopCaptureAsync();
-                Append("[telas] Monitores alterados; controle devolvido ao PC. Confira a posição e ative novamente.");
-            }
-            RefreshMonitors();
-        });
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) =>
+            _dispatcher.BeginInvoke(async () => await RefreshDisplayLayoutAsync());
     }
 
     public ObservableCollection<string> Log { get; } = [];
@@ -56,8 +73,86 @@ public sealed class PeripheralService : INotifyPropertyChanged
     public ObservableCollection<TargetOption> Targets { get; } = [];
     public AppSettings Settings => AppSettings.Instance;
     public ClassicAudioService CompanionAudio { get; } = new();
+    public VirtualDisplayService VirtualDisplay { get; } = new();
     private bool _stoppingPeripheral;
     private Task? _stopTask;
+
+    public bool IsUpdatingDisplayLayout => _layoutRefresh.IsPending;
+
+    private void NotifyDisplayLayoutRefresh()
+    {
+        OnPropertyChanged(nameof(IsUpdatingDisplayLayout));
+        OnPropertyChanged(nameof(ScreenModeButtonText));
+        OnPropertyChanged(nameof(ScreenModeStatus));
+        OnPropertyChanged(nameof(CanToggleCapture));
+    }
+
+    private void CancelDisplayLayoutRefresh()
+    {
+        _layoutRefresh.Cancel();
+        _layoutRefreshDelay?.Cancel();
+        NotifyDisplayLayoutRefresh();
+    }
+
+    private async Task RefreshDisplayLayoutAsync()
+    {
+        if (App.Current.IsExiting || _stoppingPeripheral) return;
+        _layoutRefreshDelay?.Cancel();
+        var delay = new CancellationTokenSource();
+        _layoutRefreshDelay = delay;
+        var wasCapturing = IsCapturing;
+        var windowsMode = Settings.UseWindowsDisplayLayout && Settings.EdgeSwitchEnabled;
+        // A manual Stop leaves IsCapturing true until cleanup completes. It must
+        // not become a new resume request if a display event arrives meanwhile.
+        var captureRequested = wasCapturing && _captureCancellation?.IsCancellationRequested == false;
+        var revision = _layoutRefresh.Request(captureRequested, windowsMode);
+        NotifyDisplayLayoutRefresh();
+        try
+        {
+            // Release keys/buttons and stop the old hooks before reading/rearming.
+            // This internal pause preserves intent; public/manual Stop cancels it.
+            if (wasCapturing || _captureTask is { IsCompleted: false })
+                await StopCaptureCoreAsync();
+            await Task.Delay(500, delay.Token);
+            if (!_layoutRefresh.IsCurrent(revision)) return;
+            RefreshMonitors();
+            RefreshCounters();
+            var wantedResume = IsUpdatingDisplayLayout;
+            var allowed = !App.Current.IsExiting && !_stoppingPeripheral && IsRunning && !IsBusy &&
+                Settings.UseWindowsDisplayLayout && Settings.EdgeSwitchEnabled && VirtualDisplay.IsVisible &&
+                KeyboardSubscribers > 0 && MouseSubscribers > 0;
+            var resume = _layoutRefresh.TryTakeResume(revision, allowed);
+            NotifyDisplayLayoutRefresh();
+            if (resume)
+            {
+                await StartCaptureAsync(); // Relocalizes the cursor; does not immediately capture the iPhone.
+                if (IsCapturing) Append("[telas] Posição do Windows atualizada automaticamente; passagem pela borda reativada.");
+            }
+            else if (wantedResume)
+            {
+                CaptureError = "A posição mudou, mas a tela virtual ou o iPhone não está disponível. O controle permanece no PC.";
+            }
+            else if (wasCapturing)
+            {
+                Append("[telas] Monitores alterados; controle devolvido ao PC. No modo tradicional, confira a posição e ative novamente.");
+            }
+        }
+        catch (OperationCanceledException) when (delay.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (_layoutRefresh.IsCurrent(revision))
+            {
+                _layoutRefresh.Cancel();
+                CaptureError = $"Não foi possível atualizar a posição. O controle permanece no PC. {ex.Message}";
+                NotifyDisplayLayoutRefresh();
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_layoutRefreshDelay, delay)) _layoutRefreshDelay = null;
+            delay.Dispose();
+        }
+    }
 
     // A refresh temporarily clears the ComboBox selection; never erase a saved endpoint for that.
     public string CompanionAudioDeviceId
@@ -86,6 +181,10 @@ public sealed class PeripheralService : INotifyPropertyChanged
         else
             _ = CompanionAudio.StopAsync();
     }
+
+    public bool ReconnectCompanionAudio() =>
+        IsRunning && !_stoppingPeripheral && !App.Current.IsExiting &&
+        Settings.CompanionAudioEnabled && CompanionAudio.Reconnect();
     public sealed record MonitorOption(string Id, string Title);
     public ObservableCollection<MonitorOption> Monitors { get; } = [];
     public string EdgeMonitorId
@@ -107,7 +206,9 @@ public sealed class PeripheralService : INotifyPropertyChanged
     public void RefreshMonitors()
     {
         Monitors.Clear();
-        var screens = System.Windows.Forms.Screen.AllScreens.OrderByDescending(s => s.Primary).ToArray();
+        var phone = WindowsDisplayLayout.FindPhone();
+        var screens = System.Windows.Forms.Screen.AllScreens
+            .Where(s => s.DeviceName != phone?.DeviceName).OrderByDescending(s => s.Primary).ToArray();
         for (var i = 0; i < screens.Length; i++)
         {
             var s = screens[i];
@@ -135,18 +236,24 @@ public sealed class PeripheralService : INotifyPropertyChanged
     public bool WaitingForScreenHost { get => _waitingForScreenHost; private set => Set(ref _waitingForScreenHost, value); }
     private bool _edgeMonitorReady;
     public bool EdgeMonitorReady { get => _edgeMonitorReady; private set => Set(ref _edgeMonitorReady, value); }
-    public string ScreenModeButtonText => IsCapturing ? "Desativar modo telas" : WaitingForScreenHost ? "Cancelar espera" : "Ativar modo telas";
-    public string ScreenModeStatus => IsCapturing
+    public string ScreenModeButtonText => IsUpdatingDisplayLayout ? "Cancelar atualização" : IsCapturing ? "Desativar modo telas" : WaitingForScreenHost ? "Cancelar espera" : "Ativar modo telas";
+    public string ScreenModeStatus => IsUpdatingDisplayLayout
+        ? "Atualizando a posição do Windows… O controle fica no PC e a passagem será retomada automaticamente."
+        : IsCapturing
         ? !EdgeMonitorReady ? "Iniciando a detecção da borda…"
             : _peripheral?.IsLocalTarget != false
-                ? "Pronto: leve o cursor até a borda escolhida e aguarde 0,35 s."
+                ? Settings.UseWindowsDisplayLayout
+                    ? "Pronto: passe o cursor para a tela virtual na posição definida no Windows."
+                    : "Pronto: leve o cursor até a borda escolhida e aguarde 0,35 s."
                 : "Controlando o iPhone. Ctrl+Alt+Q volta ao PC."
         : WaitingForScreenHost ? "Aguardando o iPhone conectar teclado e mouse. O controle continua no PC."
         : IsBusy ? "Iniciando Bluetooth…"
         : "Modo telas desligado. Para começar, clique em Ativar modo telas.";
-    public bool CanToggleCapture => IsCapturing || CanCapture;
+    public bool CanToggleCapture => IsUpdatingDisplayLayout || IsCapturing || CanCapture;
     public string CaptureHelp => Settings.EdgeSwitchEnabled
-        ? "Modo telas: encoste na borda escolhida e aguarde 0,35 s. Ctrl+Alt+Q volta ao PC; a passagem pela borda continua ativada. Desative o modo para encerrar."
+        ? Settings.UseWindowsDisplayLayout
+            ? "Passe para a tela virtual sem segurar teclas ou botões. Ctrl+Alt+Q volta ao PC; desative o modo para encerrar. Não transfere janelas ou arquivos."
+            : "Modo telas: encoste na borda escolhida e aguarde 0,35 s. Ctrl+Alt+Q volta ao PC; a passagem pela borda continua ativada. Desative o modo para encerrar."
         : "Ao controlar o iPhone, esta janela deixa de receber teclado e mouse. Ctrl+Alt+Q encerra o controle e devolve a entrada ao PC. Ctrl+D+C alterna o destino.";
 
     private bool _applyingSelection;
@@ -249,6 +356,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
 
     private async Task StopCoreAsync()
     {
+        CancelDisplayLayoutRefresh();
         WaitingForScreenHost = false;
         _stoppingPeripheral = true;
         // Return local input immediately even if the audio provider takes time to close.
@@ -403,7 +511,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
 
     public async Task ToggleScreenModeAsync()
     {
-        if (IsCapturing || WaitingForScreenHost)
+        if (IsCapturing || WaitingForScreenHost || IsUpdatingDisplayLayout)
         {
             WaitingForScreenHost = false;
             await StopCaptureAsync();
@@ -440,6 +548,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
     /// </param>
     public async Task StartCaptureAsync(bool resident = false)
     {
+        CancelDisplayLayoutRefresh();
         if (_peripheral is null || IsBusy || IsCapturing || _captureTask is { IsCompleted: false }) return;
         if (!resident && !CanCapture) return;
 
@@ -463,9 +572,31 @@ public sealed class PeripheralService : INotifyPropertyChanged
                 CaptureError = "O monitor escolhido não está disponível. Atualize a lista e escolha o monitor novamente.";
                 return;
             }
-            static ScreenBounds Bounds(System.Windows.Forms.Screen s) =>
-                new(s.Bounds.Left, s.Bounds.Top, s.Bounds.Width, s.Bounds.Height);
-            edgeSwitch = new EdgeSwitchOptions(hostId, Settings.EdgePosition, Bounds(monitor), screens.Select(Bounds).ToArray());
+            static ScreenBounds Bounds(System.Windows.Forms.Screen s) => WindowsDisplayLayout.Bounds(s);
+            ScreenBounds? virtualBounds = null;
+            try
+            {
+                var layoutSignature = Settings.UseWindowsDisplayLayout ? WindowsDisplayLayout.CurrentSignature() : "";
+                if (Settings.UseWindowsDisplayLayout)
+                {
+                    var phone = WindowsDisplayLayout.FindPhone();
+                    if (!VirtualDisplay.IsVisible || phone is null || phone.Primary)
+                    {
+                        CaptureError = "Mostre a tela virtual primeiro, mantenha o monitor físico como principal e use Estender nas configurações do Windows.";
+                        return;
+                    }
+                    virtualBounds = Bounds(phone);
+                }
+                edgeSwitch = new EdgeSwitchOptions(hostId, Settings.EdgePosition, Bounds(monitor), screens.Select(Bounds).ToArray(), virtualBounds);
+                if (virtualBounds.HasValue && layoutSignature != WindowsDisplayLayout.CurrentSignature())
+                    throw new InvalidOperationException("A disposição mudou durante a leitura; aguarde a estabilização das telas.");
+                _captureLayoutSignature = layoutSignature;
+            }
+            catch (InvalidOperationException ex)
+            {
+                CaptureError = $"O Windows ainda está alterando as telas. O controle permanece no PC. {ex.Message}";
+                return;
+            }
             Settings.EdgeHostId = hostId;
             OnPropertyChanged(nameof(EdgeHostId));
             // Arming the edge must never take input away from the PC immediately.
@@ -508,6 +639,7 @@ public sealed class PeripheralService : INotifyPropertyChanged
                     cancellation.Dispose();
                     IsCapturing = false;
                     EdgeMonitorReady = false;
+                    _captureLayoutSignature = "";
                     Target = DisplayTarget(peripheral);
                     SyncSelection();
                 });
@@ -518,6 +650,12 @@ public sealed class PeripheralService : INotifyPropertyChanged
     }
 
     public async Task StopCaptureAsync()
+    {
+        CancelDisplayLayoutRefresh();
+        await StopCaptureCoreAsync();
+    }
+
+    private async Task StopCaptureCoreAsync()
     {
         WaitingForScreenHost = false;
         var captureTask = _captureTask;

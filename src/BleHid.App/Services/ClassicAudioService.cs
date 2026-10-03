@@ -25,6 +25,7 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
     private bool _releaseFailed;
     private long _generation;
     private int _refreshInFlight;
+    private long _lastReconnectAt = Environment.TickCount64 - 5_000;
     private string _status = "Conexão auxiliar desligada.";
     private bool _isConnected;
     private bool _isRefreshing;
@@ -74,14 +75,31 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
     }
 
     /// <summary>Requests a single explicit target without blocking the caller.</summary>
-    public void Start(string deviceId)
+    public void Start(string deviceId) => StartSession(deviceId, reconnect: false);
+
+    /// <summary>Reopens only our audio profile, including an Opened-but-silent session.
+    /// The old handle must finish cleanup first; Stop always cancels a queued restart.</summary>
+    public bool Reconnect()
+    {
+        lock (_sync)
+        {
+            if (_desiredDeviceId is null || _releaseFailed ||
+                Environment.TickCount64 - _lastReconnectAt < 5_000) return false;
+            _lastReconnectAt = Environment.TickCount64;
+            // Keep the target read and replacement atomic with respect to StopAsync.
+            StartSession(_desiredDeviceId, reconnect: true);
+            return true;
+        }
+    }
+
+    private void StartSession(string deviceId, bool reconnect)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         CancellationTokenSource? previousCancellation;
         long generation;
         lock (_sync)
         {
-            if (_desiredDeviceId == deviceId && !_sessionTask.IsCompleted) return;
+            if (!reconnect && _desiredDeviceId == deviceId && !_sessionTask.IsCompleted) return;
             previousCancellation = _sessionCancellation;
             var previousTask = _sessionTask;
             var cancellation = new CancellationTokenSource();
@@ -96,6 +114,8 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
                 {
                     await previousTask.ConfigureAwait(false);
                     cancellation.Token.ThrowIfCancellationRequested();
+                    if (reconnect)
+                        await Task.Delay(1_500, cancellation.Token).ConfigureAwait(false);
                     await RunSessionAsync(deviceId, generation, cancellation.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -104,7 +124,8 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
             });
         }
         RequestCancellation(previousCancellation);
-        SetSessionStatus(generation, "Preparando conexão auxiliar…", false);
+        SetSessionStatus(generation, reconnect ? "Reconectando somente o áudio…" : "Preparando conexão auxiliar…", false);
+        if (reconnect) WriteLog("Reconexão do áudio solicitada; aguardando liberação da sessão anterior.");
     }
 
     /// <summary>
@@ -188,10 +209,12 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
                     // Require a second Closed observation to debounce transient changes.
                     while (true)
                     {
-                        await Task.Delay(TimeSpan.FromSeconds(3), cancellation).ConfigureAwait(false);
+                        await Task.Delay(TimeSpan.FromSeconds(1), cancellation).ConfigureAwait(false);
                         if (connection.State != AudioPlaybackConnectionState.Closed) continue;
-                        await Task.Delay(TimeSpan.FromSeconds(3), cancellation).ConfigureAwait(false);
+                        SetSessionStatus(generation, "Conexão de áudio interrompida; verificando…", false);
+                        await Task.Delay(TimeSpan.FromSeconds(1), cancellation).ConfigureAwait(false);
                         if (connection.State == AudioPlaybackConnectionState.Closed) break;
+                        SetSessionStatus(generation, "Bluetooth auxiliar conectado; áudio pode sair no PC.", true);
                     }
                     // Brief connect/disconnect loops retain their increasing backoff.
                     if (Environment.TickCount64 - connectedAt >= 60_000) retry = 0;
@@ -221,7 +244,7 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
                 SetStoppedStatus(generation);
                 return;
             }
-            var seconds = retry++ switch { 0 => 15, 1 => 30, _ => 60 };
+            var seconds = retry++ switch { 0 => 2, 1 => 5, 2 => 15, 3 => 30, _ => 60 };
             SetSessionStatus(generation, $"Aguardando o iPhone; nova tentativa em {seconds} s.", false);
             await Task.Delay(TimeSpan.FromSeconds(seconds), cancellation).ConfigureAwait(false);
         }
@@ -244,13 +267,15 @@ public sealed class ClassicAudioService : INotifyPropertyChanged
     private static void RequestCancellation(CancellationTokenSource? cancellation)
     {
         if (cancellation is null) return;
-        // WinRT cancellation can invoke native code; never perform it on the UI thread.
-        _ = Task.Run(() =>
+        // Mark the token immediately, but run native cancellation callbacks asynchronously.
+        // Queueing Cancel() itself could let a delayed reconnect open after Stop was requested.
+        try
         {
-            try { cancellation.Cancel(); }
-            catch (ObjectDisposedException) { }
-            catch (AggregateException) { }
-        });
+            _ = cancellation.CancelAsync().ContinueWith(task => { _ = task.Exception; },
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted |
+                TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        catch (ObjectDisposedException) { }
     }
 
     private bool HasReleaseFailure()

@@ -39,6 +39,20 @@ public sealed class AppSettings : INotifyPropertyChanged
     }
 
     private bool _edgeSwitchEnabled;
+    private bool _useWindowsDisplayLayout;
+    public bool UseWindowsDisplayLayout
+    {
+        get => _useWindowsDisplayLayout;
+        set { if (Set(ref _useWindowsDisplayLayout, value)) Save(); }
+    }
+
+    private bool _windowsDisplayWasPositioned;
+    public bool WindowsDisplayWasPositioned
+    {
+        get => _windowsDisplayWasPositioned;
+        set { if (Set(ref _windowsDisplayWasPositioned, value)) Save(); }
+    }
+
     private bool _middleClickReturn = true;
     public bool MiddleClickReturn
     {

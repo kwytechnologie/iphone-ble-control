@@ -18,7 +18,24 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - name: Test core
-        run: dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj -c Release
+        # This cursor timer test requires an interactive Windows desktop.
+        run: dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj -c Release --filter "FullyQualifiedName!~Hook_thread_samples_cursor_on_timer_without_requiring_mouse_callbacks"
+      - name: Build native callback bridge (x64)
+        run: |
+          $zigArchive = Join-Path $env:RUNNER_TEMP 'zig-x86_64-windows-0.15.2.zip'
+          $zigRoot = Join-Path $env:RUNNER_TEMP 'blehid-zig'
+          Invoke-WebRequest 'https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip' -OutFile $zigArchive
+          if ((Get-FileHash $zigArchive -Algorithm SHA256).Hash -ne '3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c') {
+            throw 'Zig archive SHA-256 mismatch.'
+          }
+          Expand-Archive -LiteralPath $zigArchive -DestinationPath $zigRoot
+          $zigExecutable = Join-Path $zigRoot 'zig-x86_64-windows-0.15.2/zig.exe'
+          New-Item -ItemType Directory -Force tools/NativeCallbacks/artifacts/win-x64 | Out-Null
+          & $zigExecutable cc -target x86_64-windows-gnu -shared -O2 -Wall -Wextra -Werror '-Wl,--dynamicbase' '-Wl,--nxcompat' -o tools/NativeCallbacks/artifacts/win-x64/BleHid.NativeCallbacks.dll tools/NativeCallbacks/NativeCallbacks.c
+          if ($LASTEXITCODE -ne 0) { throw 'Native callback bridge compilation failed.' }
+      - name: Build and test virtual display helper (x64)
+        # These tests validate callbacks without creating devices or installing a driver.
+        run: dotnet test tests/BleHid.VirtualDisplayHost.Tests/BleHid.VirtualDisplayHost.Tests.csproj -c Release
       - name: Build app
         run: dotnet build src/BleHid.App/BleHid.App.csproj -c Release
       - name: Build CLI

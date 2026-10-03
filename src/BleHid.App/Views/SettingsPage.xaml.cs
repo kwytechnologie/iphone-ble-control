@@ -30,6 +30,19 @@ public partial class SettingsPage : Page
     private async void OnRefreshAudioDevices(object sender, RoutedEventArgs e) =>
         await RefreshAudioDevicesAsync();
 
+    private async void OnReconnectAudio(object sender, RoutedEventArgs e)
+    {
+        if (!PeripheralService.Instance.ReconnectCompanionAudio())
+        {
+            ReconnectAudioHint.Text = "Inicie o periférico, habilite a conexão auxiliar e selecione o iPhone. Se já fez isso, aguarde alguns segundos ou confira o status acima.";
+            return;
+        }
+        ReconnectAudioHint.Text = "Reconexão solicitada. Confira o status acima e selecione o PC como saída de áudio no iPhone, se necessário. Sua automação pode desligar e ligar o AssistiveTouch.";
+        ReconnectAudioButton.IsEnabled = false;
+        try { await Task.Delay(5_000); }
+        finally { ReconnectAudioButton.IsEnabled = true; }
+    }
+
     private async Task RefreshAudioDevicesAsync()
     {
         RefreshAudioDevicesButton.IsEnabled = false;

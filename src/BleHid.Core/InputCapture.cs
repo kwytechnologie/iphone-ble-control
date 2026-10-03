@@ -51,6 +51,9 @@ public sealed class InputCapture : IDisposable
     private static readonly int[] EdgeGuardKeys = [0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11, 0x12, 0x5B, 0x5C];
     private sealed record CursorLocation(int X, int Y);
     private CursorLocation? _localCursor;
+    private sealed record PendingVirtualEntry(VirtualMonitorEntry Entry, long RequestedAt);
+    private PendingVirtualEntry? _pendingVirtualEntry;
+    private ScreenEdge _entryEdge;
 
     public EdgeSwitchOptions? EdgeSwitch { get; init; }
     public RemoteReturnOptions ReturnOptions { get; init; } = new();
@@ -77,8 +80,28 @@ public sealed class InputCapture : IDisposable
     {
         // Also reset when retargeting directly from one remote host to another.
         Interlocked.Exchange(ref _resetWheelDelta, 1);
-        if (_passThrough == value) return;
+        // The send queue may accept an edge request a little later. Do not begin capture
+        // if the user started dragging or holding a modifier in the meantime.
+        if (!value && _running && Volatile.Read(ref _pendingVirtualEntry) is not null &&
+            EdgeGuardKeys.Any(key => (GetAsyncKeyState(key) & 0x8000) != 0))
+        {
+            Interlocked.Exchange(ref _pendingVirtualEntry, null);
+            Interlocked.Exchange(ref _resetInputState, 1);
+            ReturnCursorFromVirtualMonitor();
+            ReturnLocalRequested?.Invoke();
+            return;
+        }
+        if (_passThrough == value)
+        {
+            if (value)
+            {
+                Interlocked.Exchange(ref _pendingVirtualEntry, null);
+                ReturnCursorFromVirtualMonitor();
+            }
+            return;
+        }
         if (!value && _running) RememberLocalCursor();
+        if (value) Interlocked.Exchange(ref _pendingVirtualEntry, null);
         _passThrough = value;
         Interlocked.Exchange(ref _resetInputState, 1);
         if (!value && _running) SetCursorPos(_centerX, _centerY);
@@ -87,15 +110,37 @@ public sealed class InputCapture : IDisposable
 
     private void RememberLocalCursor()
     {
-        if (!GetCursorPos(out var point)) return;
+        var pending = Interlocked.Exchange(ref _pendingVirtualEntry, null);
+        if (pending is not null)
+        {
+            _localCursor = new(pending.Entry.ReturnX, pending.Entry.ReturnY);
+            _entryEdge = pending.Entry.Edge;
+            return;
+        }
+        var havePoint = GetCursorPos(out var point);
+        if (_edgeDetector?.VirtualGeometry is { } geometry)
+        {
+            if (geometry.SafeLocalPoint(point.x, point.y) is { } safe)
+                _localCursor = new(safe.X, safe.Y);
+            return;
+        }
+        if (!havePoint) return;
         if (EdgeSwitch is { } edge && edge.Monitor.Contains(point.x, point.y))
         {
             // Return inside the screen, not on the activation edge.
             var b = edge.Monitor;
-            point.x = Math.Clamp(point.x, b.Left + 32, b.Right - 33);
-            point.y = Math.Clamp(point.y, b.Top + 32, b.Bottom - 33);
+            (point.x, point.y) = VirtualMonitorGeometry.ClampInside(b, point.x, point.y);
         }
         _localCursor = new CursorLocation(point.x, point.y);
+    }
+
+    private void ReturnCursorFromVirtualMonitor()
+    {
+        if (!_running || _edgeDetector?.VirtualGeometry is not { } geometry ||
+            !GetCursorPos(out var point) || geometry.IsPhysicalPoint(point.x, point.y)) return;
+        var safe = _localCursor is { } saved
+            ? geometry.SafeLocalPoint(saved.X, saved.Y) : geometry.SafeLocalPoint(point.x, point.y);
+        if (safe is { } target) SetCursorPos(target.X, target.Y);
     }
 
     /// <summary>Logs every hook event and report; useful only for diagnosing delivery problems.</summary>
@@ -117,6 +162,10 @@ public sealed class InputCapture : IDisposable
         _wheelDelta.Reset();
         _switchLatched = false;
         _edgeDetector = EdgeSwitch is null ? null : new EdgeSwitchDetector(EdgeSwitch);
+        if (_edgeDetector?.VirtualGeometry is { IsValid: false })
+            throw new InvalidOperationException("A tela virtual sobrepõe outra tela ou tem geometria inválida. O controle permanece no PC.");
+        _pendingVirtualEntry = null;
+        _entryEdge = EdgeSwitch?.Edge ?? ScreenEdge.Right;
         _remoteEstimate = EdgeSwitch is not null && ReturnOptions.EstimatedEdge
             ? new RemoteEdgeEstimate(EdgeSwitch.Edge, ReturnOptions.Travel) : null;
         _remoteEstimate?.Reset(Environment.TickCount64);
@@ -234,7 +283,9 @@ public sealed class InputCapture : IDisposable
             _edgeTimer = SetTimer(IntPtr.Zero, IntPtr.Zero, 25, IntPtr.Zero);
             if (_edgeTimer == IntPtr.Zero)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Não foi possível iniciar o monitoramento da borda.");
-            Log?.Invoke($"[telas] Monitoramento ativo: {edge.Edge}; monitor {edge.Monitor}; amostra 25 ms; espera {EdgeSwitchDetector.DwellMs} ms.");
+            Log?.Invoke(edge.VirtualMonitor.HasValue
+                ? $"[telas] Monitoramento ativo: monitor virtual {edge.VirtualMonitor.Value}; entrada por aresta compartilhada, sem espera; retorno protegido ao PC."
+                : $"[telas] Monitoramento ativo: {edge.Edge}; monitor {edge.Monitor}; amostra 25 ms; espera {EdgeSwitchDetector.DwellMs} ms.");
         }
         _started!.TrySetResult();
         var result = 0;
@@ -346,7 +397,19 @@ public sealed class InputCapture : IDisposable
             ReturnLocalRequested?.Invoke();
         }
         if (gesture != ReturnGesture.None) return 1;
-        if (_passThrough) return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        if (_passThrough)
+        {
+            if ((int)wParam == WM_MOUSEMOVE && _edgeDetector?.VirtualGeometry is not null)
+            {
+                var held = EdgeInputHeld();
+                // The hook runs before this move is applied. Seed from the actual local
+                // point and intercept the crossing now, rather than leaving the cursor on
+                // the invisible desktop until the 25 ms fallback poll or BLE pump runs.
+                if (GetCursorPos(out var local) && ObserveEdgeCursor(local.x, local.y, held)) return 1;
+                if (ObserveEdgeCursor(data.pt.x, data.pt.y, held)) return 1;
+            }
+            return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        }
 
         _mouseEvents++;
 
@@ -399,11 +462,52 @@ public sealed class InputCapture : IDisposable
         Interlocked.Increment(ref _edgeSamples);
         ResetInputStateIfNeeded();
         if (!GetCursorPos(out var point)) { _edgeDetector.Reset(); return; }
-        var held = _pressedVirtualKeys.Any(key => (GetAsyncKeyState(key) & 0x8000) != 0) ||
-            EdgeGuardKeys.Any(key => (GetAsyncKeyState(key) & 0x8000) != 0);
-        if (!_edgeDetector.Observe(point.x, point.y, Environment.TickCount64, held)) return;
+        ObserveEdgeCursor(point.x, point.y, EdgeInputHeld());
+    }
+
+    private bool EdgeInputHeld() =>
+        _pressedVirtualKeys.Any(key => (GetAsyncKeyState(key) & 0x8000) != 0) ||
+        EdgeGuardKeys.Any(key => (GetAsyncKeyState(key) & 0x8000) != 0);
+
+    private bool ObserveEdgeCursor(int x, int y, bool held)
+    {
+        if (!_running || !_passThrough || _edgeDetector is null) return false;
+        var now = Environment.TickCount64;
+        if (Volatile.Read(ref _pendingVirtualEntry) is { } pending)
+        {
+            if (now - pending.RequestedAt < 1000)
+            {
+                if (!held && EdgeSwitch?.VirtualMonitor?.Contains(x, y) == true)
+                {
+                    SetCursorPos(pending.Entry.ReturnX, pending.Entry.ReturnY);
+                    return true;
+                }
+                return false;
+            }
+            // Permit a fresh attempt if the host was unavailable, but keep the safe
+            // origin until selection/recovery acknowledges it: a slow send queue can
+            // still complete the original request after this retry window.
+        }
+        if (!_edgeDetector.Observe(x, y, now, held))
+        {
+            if (!held && EdgeSwitch?.VirtualMonitor?.Contains(x, y) == true)
+            {
+                // A gap/corner/unknown origin must not capture, but must not strand the
+                // cursor on the invisible screen either. Dragging remains untouched.
+                ReturnCursorFromVirtualMonitor();
+                return true;
+            }
+            return false;
+        }
+        if (_edgeDetector.LastEntry is { } entry)
+        {
+            _localCursor = new(entry.ReturnX, entry.ReturnY);
+            Volatile.Write(ref _pendingVirtualEntry, new(entry, now));
+            SetCursorPos(entry.ReturnX, entry.ReturnY);
+        }
         Log?.Invoke("[telas] Borda detectada; solicitando troca para o iPhone.");
         EdgeSwitchRequested?.Invoke();
+        return true;
     }
 
     // State belongs to the hook thread. Clear old presses when returning from local control,
@@ -415,6 +519,8 @@ public sealed class InputCapture : IDisposable
         _wheelDelta.Reset();
         _buttons = MouseButtons.None;
         _edgeDetector?.Reset();
+        _remoteEstimate = EdgeSwitch is not null && ReturnOptions.EstimatedEdge
+            ? new RemoteEdgeEstimate(_entryEdge, ReturnOptions.Travel) : null;
         _remoteEstimate?.Reset(Environment.TickCount64);
     }
 

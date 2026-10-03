@@ -1,0 +1,1 @@
+iPhone BLE Control virtual display configuration. Created explicitly for the Windows display layout integration.

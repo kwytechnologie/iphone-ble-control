@@ -61,6 +61,11 @@
           <ui:Button x:Name="RefreshAudioDevicesButton" Grid.Column="1" Content="Atualizar" Click="OnRefreshAudioDevices" />
         </Grid>
         <ui:TextBlock Text="{Binding CompanionAudio.Status}" FontTypography="BodyStrong" TextWrapping="Wrap" Margin="0,0,0,10" />
+        <ui:Button x:Name="ReconnectAudioButton" Content="Reconectar áudio" Click="OnReconnectAudio"
+                   HorizontalAlignment="Left" Margin="0,0,0,8" />
+        <ui:TextBlock x:Name="ReconnectAudioHint"
+                      Text="Sem som apesar de conectado? Reconecte somente o áudio. Isso pode desligar e ligar o AssistiveTouch pela sua automação; não altera o emparelhamento do mouse."
+                      TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10" />
         <ui:TextBlock Text="O áudio do iPhone poderá sair no PC. No Atalhos, configure a entrada normal do PC: conectar → ativar AssistiveTouch; desconectar → desativar AssistiveTouch. Use Executar Imediatamente."
                       TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8" />
         <ui:TextBlock Text="Funciona enquanto o periférico estiver iniciado. Parar ou Sair libera o áudio; minimizar para a bandeja mantém a conexão. Outros programas conectados ao iPhone podem impedir o gatilho de desconexão."

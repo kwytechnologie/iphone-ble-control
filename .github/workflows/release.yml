@@ -21,10 +21,34 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Test
+        # This cursor timer test requires an interactive Windows desktop.
         run: >
           dotnet test tests/BleHid.Core.Tests/BleHid.Core.Tests.csproj
           -c Release
+          --filter "FullyQualifiedName!~Hook_thread_samples_cursor_on_timer_without_requiring_mouse_callbacks"
           --logger "trx;LogFileName=results.trx"
+          --results-directory TestResults
+
+      - name: Build native callback bridge (x64)
+        run: |
+          $zigArchive = Join-Path $env:RUNNER_TEMP 'zig-x86_64-windows-0.15.2.zip'
+          $zigRoot = Join-Path $env:RUNNER_TEMP 'blehid-zig'
+          Invoke-WebRequest 'https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip' -OutFile $zigArchive
+          if ((Get-FileHash $zigArchive -Algorithm SHA256).Hash -ne '3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c') {
+            throw 'Zig archive SHA-256 mismatch.'
+          }
+          Expand-Archive -LiteralPath $zigArchive -DestinationPath $zigRoot
+          $zigExecutable = Join-Path $zigRoot 'zig-x86_64-windows-0.15.2/zig.exe'
+          New-Item -ItemType Directory -Force tools/NativeCallbacks/artifacts/win-x64 | Out-Null
+          & $zigExecutable cc -target x86_64-windows-gnu -shared -O2 -Wall -Wextra -Werror '-Wl,--dynamicbase' '-Wl,--nxcompat' -o tools/NativeCallbacks/artifacts/win-x64/BleHid.NativeCallbacks.dll tools/NativeCallbacks/NativeCallbacks.c
+          if ($LASTEXITCODE -ne 0) { throw 'Native callback bridge compilation failed.' }
+
+      - name: Build and test virtual display helper (x64)
+        # These tests validate callbacks without creating devices or installing a driver.
+        run: >
+          dotnet test tests/BleHid.VirtualDisplayHost.Tests/BleHid.VirtualDisplayHost.Tests.csproj
+          -c Release
+          --logger "trx;LogFileName=virtual-display-results.trx"
           --results-directory TestResults
 
       # tests/Invoke-HandoverTests.ps1 and tests/MANUAL-TESTS.md cannot run here: both need a
@@ -72,11 +96,42 @@ jobs:
           -p:DebugType=none
           -o artifacts/app/${{ matrix.rid }}
 
-      - name: Verify both executables are present
+      - name: Build native callback bridge (x64)
+        if: matrix.rid == 'win-x64'
+        run: |
+          $zigArchive = Join-Path $env:RUNNER_TEMP 'zig-x86_64-windows-0.15.2.zip'
+          $zigRoot = Join-Path $env:RUNNER_TEMP 'blehid-zig'
+          Invoke-WebRequest 'https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip' -OutFile $zigArchive
+          if ((Get-FileHash $zigArchive -Algorithm SHA256).Hash -ne '3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c') {
+            throw 'Zig archive SHA-256 mismatch.'
+          }
+          Expand-Archive -LiteralPath $zigArchive -DestinationPath $zigRoot
+          $zigExecutable = Join-Path $zigRoot 'zig-x86_64-windows-0.15.2/zig.exe'
+          New-Item -ItemType Directory -Force tools/NativeCallbacks/artifacts/win-x64 | Out-Null
+          & $zigExecutable cc -target x86_64-windows-gnu -shared -O2 -Wall -Wextra -Werror '-Wl,--dynamicbase' '-Wl,--nxcompat' -o tools/NativeCallbacks/artifacts/win-x64/BleHid.NativeCallbacks.dll tools/NativeCallbacks/NativeCallbacks.c
+          if ($LASTEXITCODE -ne 0) { throw 'Native callback bridge compilation failed.' }
+
+      - name: Publish virtual display helper (x64 only)
+        if: matrix.rid == 'win-x64'
+        # The helper and native bridge currently support x64 only.
+        run: >
+          dotnet publish tools/VirtualDisplayHost/VirtualDisplayHost.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:DebugType=none
+          -o artifacts/app/win-x64
+
+      - name: Verify package executables and native bridge
         run: |
           $missing = @()
           if (-not (Test-Path "artifacts/cli/${{ matrix.rid }}/BleHid.Cli.exe")) { $missing += 'BleHid.Cli.exe' }
           if (-not (Test-Path "artifacts/app/${{ matrix.rid }}/BleHid.App.exe")) { $missing += 'BleHid.App.exe' }
+          if ('${{ matrix.rid }}' -eq 'win-x64') {
+            if (-not (Test-Path 'artifacts/app/win-x64/BleHid.VirtualDisplayHost.exe')) { $missing += 'BleHid.VirtualDisplayHost.exe' }
+            if (-not (Test-Path 'artifacts/app/win-x64/BleHid.NativeCallbacks.dll')) { $missing += 'BleHid.NativeCallbacks.dll' }
+          }
           if ($missing) { throw "missing from the package: $($missing -join ', ')" }
 
       # Two archives because the two have different shapes: the CLI is one portable executable,

@@ -42,8 +42,31 @@
                    IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBool}}" />
       </ui:CardControl>
 
-      <StackPanel IsEnabled="{Binding IsCapturing, Converter={StaticResource InverseBool}}">
-        <ui:CardControl Margin="0,0,0,12">
+      <StackPanel>
+        <Border Padding="16" Margin="0,0,0,16" CornerRadius="8"
+                Background="{DynamicResource ControlFillColorDefaultBrush}">
+          <StackPanel>
+            <ui:TextBlock Text="iPhone nas telas do Windows" FontTypography="Subtitle" />
+            <ui:TextBlock Text="Cria um monitor virtual para organizar a posição do iPhone em Sistema → Tela. Não transmite imagem nem arquivos ao celular."
+                          TextWrapping="Wrap" Margin="0,4,0,12" />
+            <WrapPanel IsEnabled="{Binding VirtualDisplay.IsBusy, Converter={StaticResource InverseBool}}">
+              <ui:Button Content="Mostrar iPhone nas telas" Click="OnShowWindowsDisplay" Margin="0,0,8,8"
+                         IsEnabled="{Binding VirtualDisplay.IsVisible, Converter={StaticResource InverseBool}}" />
+              <ui:Button Content="Organizar no Windows" Click="OnOpenWindowsDisplaySettings" Margin="0,0,8,8" />
+              <ui:Button Content="Remover tela virtual" Click="OnHideWindowsDisplay" Margin="0,0,8,8"
+                         IsEnabled="{Binding VirtualDisplay.CanRemove}" />
+              <ui:Button Content="Recuperar janelas" Click="OnRecoverVirtualWindows" Margin="0,0,8,8"
+                         IsEnabled="{Binding VirtualDisplay.IsVisible}" />
+            </WrapPanel>
+            <ui:TextBlock Text="{Binding VirtualDisplay.Status}" TextWrapping="Wrap" Margin="0,0,0,12" />
+            <CheckBox Content="Usar a posição definida nas telas do Windows"
+                      IsEnabled="{Binding IsCapturing, Converter={StaticResource InverseBool}}"
+                      IsChecked="{Binding Settings.UseWindowsDisplayLayout, Mode=TwoWay}" />
+            <ui:TextBlock Text="Use Estender e mantenha uma tela física como principal. Com o modo telas ligado, basta arrastar no Windows e clicar em Aplicar: a posição será atualizada automaticamente. Janelas levadas à tela virtual ficam invisíveis; use Recuperar janelas ou Remover. Sair do app remove a tela; minimizar mantém."
+                          FontTypography="Caption" TextWrapping="Wrap" Margin="0,8,0,0" />
+          </StackPanel>
+        </Border>
+        <ui:CardControl Margin="0,0,0,12" IsEnabled="{Binding IsCapturing, Converter={StaticResource InverseBool}}">
           <ui:CardControl.Header>
             <StackPanel>
               <ui:TextBlock Text="Passar para o iPhone pela borda" FontTypography="BodyStrong" />
@@ -56,13 +79,15 @@
         </ui:CardControl>
 
         <Border x:Name="LayoutPanel" Padding="16" Margin="0,0,0,16" CornerRadius="8"
+                IsEnabled="{Binding IsCapturing, Converter={StaticResource InverseBool}}"
                 Background="{DynamicResource ControlFillColorDefaultBrush}"
                 Visibility="{Binding Settings.EdgeSwitchEnabled, Converter={StaticResource BoolToVisibility}}">
           <StackPanel>
             <ui:TextBlock Text="Posição das telas" FontTypography="Subtitle" />
-            <ui:TextBlock Text="Escolha o lado em que você colocou o iPhone. A posição é salva neste PC."
+            <ui:TextBlock Text="No modo tradicional, escolha o lado abaixo. No modo Windows, organize os retângulos em Sistema → Tela, encostando a tela virtual em um monitor do PC."
                           TextWrapping="Wrap" Margin="0,4,0,12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <Grid Height="210" MaxWidth="440" HorizontalAlignment="Stretch">
+            <Grid Height="210" MaxWidth="440" HorizontalAlignment="Stretch"
+                  IsEnabled="{Binding Settings.UseWindowsDisplayLayout, Converter={StaticResource InverseBool}}">
               <Grid.RowDefinitions><RowDefinition /><RowDefinition Height="90" /><RowDefinition /></Grid.RowDefinitions>
               <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="160" /><ColumnDefinition /></Grid.ColumnDefinitions>
               <RadioButton Grid.Row="0" Grid.Column="1" Content="iPhone acima" GroupName="PhonePosition"
@@ -92,7 +117,7 @@
                       SelectedValue="{Binding EdgeHostId, Mode=TwoWay}" AutomationProperties.Name="iPhone de destino" />
             <ui:TextBlock Text="Escolha o iPhone conectado. Se houver apenas um dispositivo, ele será selecionado ao ativar."
                           FontTypography="Caption" TextWrapping="Wrap" Margin="0,4,0,12" />
-            <ui:TextBlock Text="Para entrar: mova dentro da tela, encoste no meio da borda escolhida e aguarde 0,35 s, mesmo com o cursor parado. Não segure teclas ou botões. A passagem entre monitores do próprio PC fica livre."
+            <ui:TextBlock Text="Modo tradicional: encoste no meio da borda escolhida e aguarde 0,35 s. Modo Windows: atravesse para a tela virtual. Não segure teclas ou botões. A passagem entre monitores do próprio PC fica livre."
                           TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             <ui:TextBlock Text="Para voltar, configure as opções abaixo. Ctrl+Alt+Q continua disponível como resgate. Não espelha a tela nem permite arrastar janelas ou arquivos."
                           TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />

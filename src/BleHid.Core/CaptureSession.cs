@@ -76,6 +76,16 @@ public static class CaptureSession
             var clock = Stopwatch.StartNew();
             var iterations = 0;
             long lastMouseSend = -1000;
+            long lastSlowSendWarning = -10_000;
+            void CheckSendDuration(long started)
+            {
+                var now = clock.ElapsedMilliseconds;
+                var elapsed = now - started;
+                if (elapsed < 100 || now - lastSlowSendWarning < 10_000) return;
+                lastSlowSendWarning = now;
+                // Timing only: never include keys, text, cursor coordinates or device IDs.
+                log($"  [link] Envio HID lento: {elapsed} ms (intervalo alvo {PointerIntervalMs()} ms).");
+            }
             if (verbose) log("  [pump] started");
             while (!pumpCancellation.IsCancellationRequested)
             {
@@ -88,7 +98,9 @@ public static class CaptureSession
 
                 try
                 {
-                    while (!pumpCancellation.IsCancellationRequested && keyQueue.TryDequeue(out var key))
+                    // Preserve keyboard order without starving pointer updates under key bursts.
+                    for (var batch = 0; batch < 8 && !pumpCancellation.IsCancellationRequested &&
+                         keyQueue.TryDequeue(out var key); batch++)
                     {
                         if (key.Epoch != Volatile.Read(ref recoveryEpoch)) continue;
                         if (key.Kind == Queued.GoEdgeHost)
@@ -114,7 +126,7 @@ public static class CaptureSession
                                 pendingButtons = MouseButtons.None;
                                 mouseDirty = false;
                             }
-                            await peripheral.RefreshHostNamesAsync();
+                            // Friendly names are refreshed by the UI, never on the send path.
                             if (key.Epoch != Volatile.Read(ref recoveryEpoch) || cancellationToken.IsCancellationRequested)
                             {
                                 peripheral.SelectLocal();
@@ -130,10 +142,13 @@ public static class CaptureSession
 
                         var started = clock.ElapsedMilliseconds;
                         await peripheral.SendKeyboardAsync(key.Modifiers, key.Usages!);
+                        CheckSendDuration(started);
                         var elapsed = clock.ElapsedMilliseconds - started;
                         if (verbose && sent < 40) log($"  [pump] key notify #{sent} took {elapsed} ms");
                         Interlocked.Increment(ref sent);
                     }
+
+                    if (!keyQueue.IsEmpty) Wake();
 
                     pumpCancellation.Token.ThrowIfCancellationRequested();
                     bool hasMotion;
@@ -162,6 +177,7 @@ public static class CaptureSession
                         var started = clock.ElapsedMilliseconds;
                         lastMouseSend = started;
                         await peripheral.SendMouseAsync(buttons, dx, dy, wheel);
+                        CheckSendDuration(started);
                         if (verbose && sent < 40) log($"  [pump] mouse notify #{sent} ({dx},{dy}) took {clock.ElapsedMilliseconds - started} ms");
                         Interlocked.Increment(ref sent);
                     }
